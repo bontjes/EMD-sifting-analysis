@@ -222,8 +222,6 @@ def trials_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_
             
             emd.plotting.plot_hilberthuang(selected_hhts[nth_method], time_centres/srate, freq_centres,
                                cmap='viridis', time_lims = (0,2), freq_lims=(1,20), log_y=False, fig=fig, ax=axs[nth_trial*2+1, nth_method])
-            
-            
             axs[nth_trial*2, nth_method].plot(xaxis, imf[:5*srate], label = label)
             axs[nth_trial*2, nth_method].legend()
             axs[nth_trial*2, nth_method].set_xlabel('Time (s)')
