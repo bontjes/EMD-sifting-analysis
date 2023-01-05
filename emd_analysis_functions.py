@@ -203,11 +203,12 @@ def single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, 
 
 
 def trials_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_names, srate, freq_edges, freq_centres):
-    selected_imfs_trials = []
+    # selected_imfs_trials = []
     trials = len(trials_list)
     methods = len(method_names)
     pmsis_trials = np.zeros((trials, methods))
     fig, axs = plt.subplots(trials*2, 5, figsize=(30,30))
+    fig.tight_layout(pad=5) 
     for nth_trial, trial in enumerate(trials_list):
         imfs_methods_ae, selected_imfs_all, selected_freqs_all, theta_indices_all, selected_hhts, pmsis_all = single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, method_names, freq_edges, freq_centres)
         xaxis = np.arange(0,len(selected_imfs_all[0][:2*srate]))/srate
