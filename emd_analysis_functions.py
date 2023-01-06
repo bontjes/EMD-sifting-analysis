@@ -80,8 +80,8 @@ def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srat
     for nth_method, imfs in enumerate(imfs_all):
         samples = len(imfs[:,0])
         summed_imf = np.zeros(samples)
+        imfs_to_remove = []
         for count, i in enumerate(copy.deepcopy(indices_all[nth_method])):
-            imfs_to_remove = []
             zcs =  emd.imftools.zero_crossing_count(imfs[:,i])/samples*srate
             freq = freqs_imfs_all[nth_method][i]
             if abs(zcs-freq) < 20:
@@ -93,8 +93,7 @@ def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srat
             # filter out noisy IMF's that have too many zero crossings for the frequency they were assigned to
             else:
                 del indices_all[nth_method][count]
-        for imf_index in imfs_to_remove:
-            imfs_all_ae[nth_method] = np.delete(imfs_all_ae[nth_method], imf_index ,1)
+        imfs_all_ae[nth_method] = np.delete(imfs_all_ae[nth_method], imfs_to_remove ,1)
         
         if len(indices_all[nth_method]) >1:
             imfs_all_ae[nth_method] = np.insert(imfs_all_ae[nth_method],-1, summed_imf, axis=1)
