@@ -96,7 +96,7 @@ def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srat
         imfs_all_ae[nth_method] = np.delete(imfs_all_ae[nth_method], imfs_to_remove ,1)
         
         if len(indices_all[nth_method]) >1:
-            imfs_all_ae[nth_method] = np.insert(imfs_all_ae[nth_method],-1, summed_imf, axis=1)
+            imfs_all_ae[nth_method] = np.insert(imfs_all_ae[nth_method], indices_all[nth_method][0], summed_imf, axis=1)
             ipifia_summed = freqtr_methods([summed_imf], srate)[0]
             _, _, summed_hht = calc_imf_freqs(ipifia_summed, freq_edges)
             selected_hhts.append(summed_hht[:,:,0])
