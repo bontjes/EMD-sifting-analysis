@@ -262,14 +262,16 @@ def plot_wf_hht(selected_imfs_all, selected_freqs_all, selected_hhts, method_nam
             axs[0, nth_method].set_title(method_name)
         nth_method += 1
 
-def plot_pmsi(pmsis_trials, method_names):
+def plot_pmsi(pmsis_trials, method_names, title):
     fig2, axs2 = plt.subplots(1, figsize = (25,10))
     means = np.nanmean(pmsis_trials, axis = 0)
     errors = np.nanstd(pmsis_trials, axis=0)
     xaxis = np.arange(len(method_names))
-    axs2.set_ylabel('PMSI')
+    axs2.set_ylabel('PMSI', size=20)
     axs2.set_xticks(xaxis)
     axs2.set_xticklabels(method_names)
-    axs2.set_title('Pseudo mode splitting-index')
+    axs2.set_title(title, size=30)
     axs2.yaxis.grid(True)
-    axs2.bar(xaxis, means, yerr=errors)
+    axs2.bar(xaxis, means, alpha=0.5, ecolor='black', capsize=15, yerr=errors)
+    axs2.xaxis.set_tick_params(labelsize=15)
+    axs2.yaxis.set_tick_params(labelsize=15)
