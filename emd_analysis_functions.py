@@ -139,17 +139,18 @@ def plot_imfs_methods(imfs_methods, method_names, freqs_imfs_all, theta_indices_
 
 def pmsi_all(imfs_all_ae, theta_indices):
     pmsi_all = []
-    # nth_method = 0
     for method_imfs, method_thetas in zip(imfs_all_ae, theta_indices):
         if len(method_thetas) > 1:
-            pmsi_single_method = PMSI(method_imfs, -1, method='both')
+            pmsi_single_method = PMSI(method_imfs, method_thetas[0], method='both')
         elif len(method_thetas) == 0:
             pmsi_single_method = np.nan
         else:
             imf = method_thetas[0]
             if imf == len(method_imfs[0]) - 1:
-                imf = -1
-            pmsi_single_method = PMSI(method_imfs, imf, method='both')
+                # if the selected imf was the last IMF of the set, set the PMSI as the PMSI to the IMF above, multiplied by 2
+                pmsi_single_method = PMSI(method_imfs, imf, method='above')
+            else:
+                pmsi_single_method = PMSI(method_imfs, imf, method='both')
         pmsi_all.append(pmsi_single_method)
     return pmsi_all
 
@@ -275,3 +276,90 @@ def plot_pmsi(pmsis_trials, method_names, title):
     axs2.bar(xaxis, means, alpha=0.5, ecolor='black', capsize=15, yerr=errors)
     axs2.xaxis.set_tick_params(labelsize=15)
     axs2.yaxis.set_tick_params(labelsize=15)
+
+def iterated_sine(points, order, normalize = True):
+    for _ in range(order):
+        points = np.sin(points)
+    if normalize == False:
+        return points
+    else:
+        return points / np.max(points)
+
+# returns a list of length n_methods
+# each element in that list is an IMF. Either a single theta IMF or multiple IMF's summed up.
+# also the frequency of the selected imfs is returned
+def select_imfs_target(imfs_all, freqs_imfs_all, indices_all, hht_all, srate, target_freq, pmsi_only = False):
+    selected_imfs_all = []
+    selected_freqs_all = []
+    selected_hhts = []
+    for nth_method, imfs in enumerate(imfs_all):
+        samples = len(imfs[:,0])
+        for count, i in enumerate(copy.deepcopy(indices_all[nth_method])):
+            zcs =  (emd.imftools.zero_crossing_count(imfs[:,i])/samples)*srate
+            freq = freqs_imfs_all[nth_method][i]
+            # filter out noisy IMF's that have too many zero crossings for the frequency they were assigned to
+            if abs(zcs-freq) > 20:
+                indices_all[nth_method].remove(i)
+        if len(indices_all[nth_method]) == 1:
+            selected_imf = imfs_all[nth_method][:, indices_all[nth_method][0]]
+            selected_hht = hht_all[nth_method][:,:, indices_all[nth_method][0]]
+        elif len(indices_all[nth_method]) > 1:
+            candidate_freqs = [freqs_imfs_all[nth_method][i] for i in indices_all[nth_method]]
+            diff = abs( np.array(candidate_freqs) - target_freq)
+            closest = np.argmin(diff)
+            indices_all[nth_method] = [ indices_all[nth_method][closest] ]
+            selected_imf = imfs_all[nth_method][:, indices_all[nth_method][0]]
+            selected_hht = hht_all[nth_method][:,:, indices_all[nth_method][0]]
+        elif len(indices_all[nth_method]) == 0:
+            selected_imf = np.zeros_like(imfs_all[nth_method])
+            selected_hht = np.zeros_like(hht_all[0][:,:, 0])
+        selected_imfs_all.append(selected_imf)
+        selected_freqs = [freqs_imfs_all[nth_method][i] for i in indices_all[nth_method]]
+        selected_freqs_all.append(selected_freqs)
+        selected_hhts.append(selected_hht)
+    if pmsi_only == True:
+        return indices_all
+    return selected_imfs_all, selected_freqs_all, indices_all, selected_hhts
+
+def gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq, pmsi_only = False):
+    imfs_methods, mask_freqs = run_mask_methods(trial, srate, maskmethods_list)
+    for ensemble_config in ensemblemethods_list:
+        imfs_methods.append(ensemble_config(trial))
+    freq_stats = freqtr_methods(imfs_methods, srate)
+    freqs_imfs_all, theta_indices_all, hht_all = calc_imf_freqs_all(freq_stats, freq_edges)
+    if pmsi_only == False:
+        selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts = select_imfs_target(imfs_methods, freqs_imfs_all, theta_indices_all, hht_all, srate, target_freq)
+        pmsis_all = pmsi_all(imfs_methods, theta_indices)
+        return imfs_methods, selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts, pmsis_all
+    else:
+        theta_indices = select_imfs_target(imfs_methods, freqs_imfs_all, theta_indices_all, hht_all, srate, target_freq, pmsi_only = True)
+        return pmsi_all(imfs_methods, theta_indices)
+
+
+def gensignals_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_names, srate, freq_edges, target_freq, pmsi_only = False):
+    # The extracted theta waves of each method, per trial. so the first element will be a set of n theta imf's, where n is the amount of methods
+    selected_imfs_trials = []
+    # The new set of IMF's where the theta imf's in a method are summed up
+    imfs_trials = []
+    # HHT's of the theta extracted waves
+    hhts_trials = []
+    selected_freqs_trials = []
+    theta_indices_trials = []
+    trials = len(trials_list)
+    methods = len(method_names)
+    pmsis_trials = np.zeros((trials, methods))
+    for nth_trial, trial in enumerate(trials_list):
+        if pmsi_only == False:
+            imfs_methods, selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts, pmsis_all = gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq)
+            hhts_trials.append(selected_hhts)
+            selected_imfs_trials.append(selected_imfs_all)
+            imfs_trials.append(imfs_methods)
+            selected_freqs_trials.append(selected_freqs_all)
+            theta_indices_trials.append(theta_indices)
+        else:
+            pmsis_all = gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq, pmsi_only = True)
+        pmsis_trials[nth_trial] = np.array(pmsis_all)
+    if pmsi_only == False:
+        return selected_imfs_trials, imfs_trials, selected_freqs_trials, hhts_trials, pmsis_trials
+    else:
+        return pmsis_trials
