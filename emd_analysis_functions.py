@@ -363,3 +363,8 @@ def gensignals_analysis(trials_list, maskmethods_list, ensemblemethods_list, met
         return selected_imfs_trials, imfs_trials, selected_freqs_trials, hhts_trials, pmsis_trials
     else:
         return pmsis_trials
+def calc_pa_IF(signal, srate, npoints=48):
+    IP, IF, _ = emd.spectra.frequency_transform(signal, srate, 'nht')
+    cycles_signal = emd.cycles.get_cycle_vector(IP)
+    pa_if_signal = emd.cycles.phase_align(IP, IF, cycles = cycles_signal, npoints=npoints)
+    return np.mean(pa_if_signal[0], axis=1)
