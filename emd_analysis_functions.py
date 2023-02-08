@@ -15,7 +15,7 @@ import copy
 
 
 # Returns n_methods sets of IMFs, depending on the amount of methods
-def run_mask_methods(trace, srate, method_partials):
+def run_mask_methods(trace, method_partials):
     imfs_methods = []
     masks = []
     for method in method_partials:
@@ -69,12 +69,14 @@ def extract_thetas(freqs_imfs):
 # returns a list of length n_methods
 # each element in that list is an IMF. Either a single theta IMF or multiple IMF's summed up.
 # also the frequency of the selected imfs is returned
-def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srate, pmsi_only = False):
+# this function is used when running on the object space task data, as it sums all the IMFs within theta range.
+def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srate):
     selected_imfs_all = []
     selected_freqs_all = []
     # Set of IMF's, after summing up all the theta IMF's in a method
     # So for example, if IT mask sift has IMF-3 and IMF-4 in theta range,
     # I will add IMF-3 + IMF-4 to the set of IMF's, and remove IMF-3 and IMF-4 from the set.
+    # ae stands for after extraction, which refers to the process in the line above
     imfs_all_ae = copy.deepcopy(imfs_all)
     selected_hhts = []
     for nth_method, imfs in enumerate(imfs_all):
@@ -105,38 +107,9 @@ def select_imfs(imfs_all, freqs_imfs_all, indices_all, freq_edges, hht_all, srat
         selected_imfs_all.append(summed_imf)
         selected_freqs = [freqs_imfs_all[nth_method][i] for i in indices_all[nth_method]]
         selected_freqs_all.append(selected_freqs)
-    if pmsi_only == True:
-        return imfs_all_ae, indices_all
     return imfs_all_ae, selected_imfs_all, selected_freqs_all, indices_all, selected_hhts
         
-# plots the hht and the selected imf's for visualisation
-def plot_imfs_methods(imfs_methods, method_names, freqs_imfs_all, theta_indices_all, freq_centres, selected_hhts, srate):
-    assert len(imfs_methods) == len(method_names)
-    subplot = 0
-    nth_method = 0
-    samples = len(imfs_methods[0])
-    time_centres = np.arange(samples)-.5
-    rows = len(imfs_methods)
-    fig3,axs3 = plt.subplots(rows,2, figsize=(20,20))
-    fig3.tight_layout(pad=5)
-
-    for imf, method_name, hht in zip(imfs_methods, method_names, selected_hhts):
-        label = "IMF-" + str(theta_indices_all[nth_method][0]+1) + ", " + str(freqs_imfs_all[nth_method][theta_indices_all[nth_method][0]])
-        if len(theta_indices_all[nth_method]) >1:
-            for theta_index in theta_indices_all[nth_method][1:]:
-                label += " + IMF-" + str( theta_index +1) + ", " + str(freqs_imfs_all[nth_method][theta_index])
-        emd.plotting.plot_hilberthuang(selected_hhts[nth_method][:3*srate, :], time_centres/srate, freq_centres,
-                               cmap='viridis', time_lims = (0,3), freq_lims=(1,20), log_y=False, fig=fig3, ax=axs3[subplot, 1])
-
-        axs3[subplot,0].plot(np.arange(0,len(imf[:3*srate]))/srate, imf[:3*srate]/srate, label = label)
-        axs3[subplot,0].legend()
-        axs3[subplot,0].set_xlabel('Time (s)')
-        axs3[subplot,0].set_ylabel('\u03BCv')
-        axs3[subplot,0].set_title(method_name)
-        subplot += 1
-        nth_method += 1
-    plt.show()
-
+# from a list of pmsi sets and imf indices, compute the pmsi of each n'th IMF in each set of IMF's.
 def pmsi_all(imfs_all_ae, theta_indices):
     pmsi_all = []
     for method_imfs, method_thetas in zip(imfs_all_ae, theta_indices):
@@ -148,7 +121,7 @@ def pmsi_all(imfs_all_ae, theta_indices):
             imf = method_thetas[0]
             if imf == len(method_imfs[0]) - 1:
                 # if the selected imf was the last IMF of the set, set the PMSI as the PMSI to the IMF above, multiplied by 2
-                pmsi_single_method = PMSI(method_imfs, imf, method='above')
+                pmsi_single_method = PMSI(method_imfs, imf, method='above') * 2
             else:
                 pmsi_single_method = PMSI(method_imfs, imf, method='both')
         pmsi_all.append(pmsi_single_method)
@@ -184,38 +157,23 @@ def plot_pt_imfs(selected_imfs_all, theta_indices_all, srate, method_names):
         axs3[subplot].set_title(title)
         subplot += 1
 
-def calc_rd_ratio(selected_imfs_all, srate):
-    rds_all = []
-    for method_imfs in selected_imfs_all:
-        rds_method = []
-        for imf in method_imfs:
-            df_shapes = compute_shape_features_custom(imf, srate, f_range = None)
-            ratio = (df_shapes['volt_rise'] / df_shapes['volt_decay']).mean()
-            rds_method.append(ratio)
-        rds_all.append(rds_method)
-    return rds_all
-
 def plot_output_methods(selected_imfs_all, srate):
     plots = [plt.plot(imf[:5*srate]) for imf in selected_imfs_all]
     return plots
 
-def single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, pmsi_only = False):
-    imfs_methods, masks_methods = run_mask_methods(trial, srate, maskmethods_list)
+def single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges):
+    imfs_methods, _ = run_mask_methods(trial, maskmethods_list)
     for ensemble_config in ensemblemethods_list:
         imfs_methods.append(ensemble_config(trial))
     freq_stats = freqtr_methods(imfs_methods, srate)
     freqs_imfs_all, theta_indices_all, hht_all = calc_imf_freqs_all(freq_stats, freq_edges)
-    if pmsi_only == False:
-        imfs_methods_ae, selected_imfs_all, selected_freqs_all, theta_indices_ae, selected_hhts = select_imfs(imfs_methods, freqs_imfs_all, theta_indices_all, freq_edges, hht_all, srate)
-        pmsis_all = pmsi_all(imfs_methods_ae, theta_indices_ae)
-        return imfs_methods_ae, selected_imfs_all, selected_freqs_all, theta_indices_all, selected_hhts, pmsis_all
-    else:
-        imfs_methods_ae, theta_indices_ae = select_imfs(imfs_methods, freqs_imfs_all, theta_indices_all, freq_edges, hht_all, srate, pmsi_only = True)
-        return pmsi_all(imfs_methods_ae, theta_indices_ae)
+    imfs_methods_ae, selected_imfs_all, selected_freqs_all, theta_indices_ae, selected_hhts = select_imfs(imfs_methods, freqs_imfs_all, theta_indices_all, freq_edges, hht_all, srate)
+    pmsis_all = pmsi_all(imfs_methods_ae, theta_indices_ae)
+    return imfs_methods_ae, selected_imfs_all, selected_freqs_all, theta_indices_all, selected_hhts, pmsis_all
 
 
 
-def trials_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_names, srate, freq_edges, pmsi_only = False):
+def trials_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_names, srate, freq_edges):
     # The extracted theta waves of each method, per trial. so the first element will be a set of n theta imf's, where n is the amount of methods
     selected_imfs_trials = []
     # The new set of IMF's where the theta imf's in a method are summed up
@@ -227,41 +185,12 @@ def trials_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_
     methods = len(method_names)
     pmsis_trials = np.zeros((trials, methods))
     for nth_trial, trial in enumerate(trials_list):
-        if pmsi_only == False:
-            imfs_methods_ae, selected_imfs_all, selected_freqs_all, _, selected_hhts, pmsis_all = single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges)
-            hhts_trials.append(selected_hhts)
-            selected_imfs_trials.append(selected_imfs_all)
-            imfs_ae_trials.append(imfs_methods_ae)
-            selected_freqs_trials.append(selected_freqs_all)
-            
-        else:
-            pmsis_all = single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, pmsi_only = True)
-        pmsis_trials[nth_trial] = np.array(pmsis_all)
-    if pmsi_only == False:
-        return selected_imfs_trials, imfs_ae_trials, selected_freqs_trials, hhts_trials, pmsis_trials
-    else:
-        return pmsis_trials
-
-def plot_wf_hht(selected_imfs_all, selected_freqs_all, selected_hhts, method_names, freq_centres, srate ):
-    fig, axs = plt.subplots(2, 5, figsize=(35,8))
-    fig.tight_layout(pad=5) 
-    time_centres = np.arange(2*srate)-.5
-    xaxis = np.arange(0,2*srate)/srate
-    nth_method = 0
-    for imf, method_name, hht in zip(selected_imfs_all, method_names, selected_hhts):
-        if len(selected_freqs_all[nth_method]) > 0:
-            label = method_name + ', ' + str( round(selected_freqs_all[nth_method][0],2) ) +'Hz'
-            if len(selected_freqs_all[nth_method]) > 1:
-                for freq in selected_freqs_all[nth_method][1:]:
-                    label += ' and ' + str( round(freq,2) ) + 'Hz'
-            emd.plotting.plot_hilberthuang(hht, time_centres/srate, freq_centres,
-                            cmap='viridis', time_lims = (0,2), freq_lims=(1,20), log_y=False, fig=fig, ax=axs[1, nth_method])
-            axs[0, nth_method].plot(xaxis, imf[:2*srate], label = label)
-            axs[0, nth_method].legend()
-            axs[0, nth_method].set_xlabel('Time (s)')
-            axs[0, nth_method].set_ylabel('\u03BCv')
-            axs[0, nth_method].set_title(method_name)
-        nth_method += 1
+        imfs_methods_ae, selected_imfs_all, selected_freqs_all, _, selected_hhts, pmsis_all = single_trial_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges)
+        hhts_trials.append(selected_hhts)
+        selected_imfs_trials.append(selected_imfs_all)
+        imfs_ae_trials.append(imfs_methods_ae)
+        selected_freqs_trials.append(selected_freqs_all)
+    return selected_imfs_trials, imfs_ae_trials, selected_freqs_trials, hhts_trials, pmsis_trials
 
 def plot_pmsi(pmsis_trials, method_names, title):
     fig2, axs2 = plt.subplots(1, figsize = (25,10))
@@ -277,6 +206,8 @@ def plot_pmsi(pmsis_trials, method_names, title):
     axs2.xaxis.set_tick_params(labelsize=15)
     axs2.yaxis.set_tick_params(labelsize=15)
 
+# apply a sine function 'order' times on a time series
+# a higher order increases IF variability
 def iterated_sine(points, order, normalize = True):
     for _ in range(order):
         points = np.sin(points)
@@ -285,10 +216,13 @@ def iterated_sine(points, order, normalize = True):
     else:
         return points / np.max(points)
 
-# returns a list of length n_methods
+# returns a list selected_imfs_all of length n_methods
 # each element in that list is an IMF. Either a single theta IMF or multiple IMF's summed up.
 # also the frequency of the selected imfs is returned
-def select_imfs_target(imfs_all, freqs_imfs_all, indices_all, hht_all, srate, target_freq, pmsi_only = False):
+# this function is used to select IMFs from EMD outputs on generated signals. The IMF selected will be 
+# the IMF closest to the target_freq. When add_imf_above is set to True, the IMF above the selected
+# IMF will be summed with the selected IMF. 
+def select_imfs_target(imfs_all, freqs_imfs_all, indices_all, hht_all, srate, target_freq, add_imf_above = False):
     selected_imfs_all = []
     selected_freqs_all = []
     selected_hhts = []
@@ -301,70 +235,296 @@ def select_imfs_target(imfs_all, freqs_imfs_all, indices_all, hht_all, srate, ta
             if abs(zcs-freq) > 20:
                 indices_all[nth_method].remove(i)
         if len(indices_all[nth_method]) == 1:
-            selected_imf = imfs_all[nth_method][:, indices_all[nth_method][0]]
+            selected_imf = imfs[:, indices_all[nth_method][0]]
             selected_hht = hht_all[nth_method][:,:, indices_all[nth_method][0]]
         elif len(indices_all[nth_method]) > 1:
             candidate_freqs = [freqs_imfs_all[nth_method][i] for i in indices_all[nth_method]]
             diff = abs( np.array(candidate_freqs) - target_freq)
             closest = np.argmin(diff)
             indices_all[nth_method] = [ indices_all[nth_method][closest] ]
-            selected_imf = imfs_all[nth_method][:, indices_all[nth_method][0]]
+            selected_imf = imfs[:, indices_all[nth_method][0]]
             selected_hht = hht_all[nth_method][:,:, indices_all[nth_method][0]]
         elif len(indices_all[nth_method]) == 0:
             selected_imf = np.zeros_like(imfs_all[nth_method])
             selected_hht = np.zeros_like(hht_all[0][:,:, 0])
+        if add_imf_above == True and len(indices_all[nth_method]) > 0:
+            selected_imf += imfs[:, indices_all[nth_method][0]-1]
+        
         selected_imfs_all.append(selected_imf)
         selected_freqs = [freqs_imfs_all[nth_method][i] for i in indices_all[nth_method]]
         selected_freqs_all.append(selected_freqs)
         selected_hhts.append(selected_hht)
-    if pmsi_only == True:
-        return indices_all
     return selected_imfs_all, selected_freqs_all, indices_all, selected_hhts
 
-def gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq, pmsi_only = False):
-    imfs_methods, mask_freqs = run_mask_methods(trial, srate, maskmethods_list)
+# use an amount of EMD method configurations on a single generated signal. returns the sets of imfs and other characteristics of each methods' output 
+def gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq, add_imf_above = False):
+    imfs_methods, _ = run_mask_methods(trial, maskmethods_list)
     for ensemble_config in ensemblemethods_list:
         imfs_methods.append(ensemble_config(trial))
     freq_stats = freqtr_methods(imfs_methods, srate)
     freqs_imfs_all, theta_indices_all, hht_all = calc_imf_freqs_all(freq_stats, freq_edges)
-    if pmsi_only == False:
-        selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts = select_imfs_target(imfs_methods, freqs_imfs_all, theta_indices_all, hht_all, srate, target_freq)
-        pmsis_all = pmsi_all(imfs_methods, theta_indices)
-        return imfs_methods, selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts, pmsis_all
-    else:
-        theta_indices = select_imfs_target(imfs_methods, freqs_imfs_all, theta_indices_all, hht_all, srate, target_freq, pmsi_only = True)
-        return pmsi_all(imfs_methods, theta_indices)
+    selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts = select_imfs_target(imfs_methods, freqs_imfs_all, theta_indices_all, hht_all, srate, target_freq, add_imf_above)
+    pmsis_all = pmsi_all(imfs_methods, theta_indices)
+    return imfs_methods, selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts, pmsis_all
 
+# convert a signal to its phase-aligned waveform
+def calc_pa_wf(signal, srate, amppercentile = 10, npoints=48):
+    IP, IF, IA = emd.spectra.frequency_transform(signal, srate, 'nht')
+    thresh = np.percentile(IA, amppercentile)
+    mask = IA > thresh
+    mask_cycles = emd.cycles.get_cycle_vector(IP, return_good=True, mask=mask)
+    pa_signal = emd.cycles.phase_align(IP, signal, cycles=mask_cycles, npoints = npoints)
+    return np.nanmean(pa_signal[0], axis=1)
 
-def gensignals_analysis(trials_list, maskmethods_list, ensemblemethods_list, method_names, srate, freq_edges, target_freq, pmsi_only = False):
-    # The extracted theta waves of each method, per trial. so the first element will be a set of n theta imf's, where n is the amount of methods
-    selected_imfs_trials = []
-    # The new set of IMF's where the theta imf's in a method are summed up
-    imfs_trials = []
-    # HHT's of the theta extracted waves
-    hhts_trials = []
-    selected_freqs_trials = []
-    theta_indices_trials = []
-    trials = len(trials_list)
-    methods = len(method_names)
-    pmsis_trials = np.zeros((trials, methods))
-    for nth_trial, trial in enumerate(trials_list):
-        if pmsi_only == False:
-            imfs_methods, selected_imfs_all, selected_freqs_all, theta_indices, selected_hhts, pmsis_all = gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq)
-            hhts_trials.append(selected_hhts)
-            selected_imfs_trials.append(selected_imfs_all)
-            imfs_trials.append(imfs_methods)
-            selected_freqs_trials.append(selected_freqs_all)
-            theta_indices_trials.append(theta_indices)
-        else:
-            pmsis_all = gensignal_analysis(trial, srate, maskmethods_list, ensemblemethods_list, freq_edges, target_freq, pmsi_only = True)
-        pmsis_trials[nth_trial] = np.array(pmsis_all)
-    if pmsi_only == False:
-        return selected_imfs_trials, imfs_trials, selected_freqs_trials, hhts_trials, pmsis_trials
+# compute the phase-aligned IF by finding cycles and averaging over the IFs in these cycles.
+def calc_pa_IF(signal, srate, amppercentile = 10, npoints=48):
+    IP, IF, IA = emd.spectra.frequency_transform(signal, srate, 'nht')
+    thresh = np.percentile(IA, amppercentile)
+    mask = IA > thresh
+    mask_cycles = emd.cycles.get_cycle_vector(IP, return_good=True, mask=mask)
+    pa_if_signal = emd.cycles.phase_align(IP, IF, cycles = mask_cycles, npoints=npoints)
+    return np.nanmean(pa_if_signal[0], axis=1)
+
+# compute the frequency distortion of a phase-aligned IF
+def calc_fd(pa_if, target_freq):
+    return (np.max(pa_if) - np.min(pa_if)) / target_freq
+
+# construct a theta-phase modulating component, and a gamma-amplitude modulated component summed.
+def construct_thetagamma(f_p, f_a, srate, data_length, n_sin, A_fpmax = 1, nonmodulatedamplitude=2):
+    npnts = srate*data_length #number of points to generate,
+    t  = np.arange(0,npnts)/srate #time vector
+    # fp is the theta/phase frequency
+    # fa is the gamma/amplitude frequency
+    # A_fpmax is the max amplitude of the theta component
+    theta_pure = A_fpmax*np.sin(2*np.pi*t*f_p)
+    if n_sin == 0:
+        theta = theta_pure
     else:
-        return pmsis_trials
-def calc_pa_IF(signal, srate, npoints=48):
-    IP, IF, _ = emd.spectra.frequency_transform(signal, srate, 'nht')
-    cycles_signal = emd.cycles.get_cycle_vector(IP)
-    pa_if_signal = emd.cycles.phase_align(IP, IF, cycles = cycles_signal, npoints=npoints)
-    return np.mean(pa_if_signal[0], axis=1)
+        theta = iterated_sine(theta_pure, n_sin)
+    A_fpmax = 1 #Maximal amplitude of fp
+    # A_fa is the theta-modulated amplitude of the gamme component
+    A_fa=(0.2*(theta+1)+nonmodulatedamplitude*0.1)
+    gamma_pure = np.sin(2*np.pi*t*f_a)
+    gamma = A_fa * gamma_pure
+    return theta + gamma, theta, gamma
+
+# add white noise to a signal
+def add_noise(signal, sigma):
+    gauss = sigma * np.random.randn(1,len(signal))
+    return np.add(signal, gauss[0])
+
+# construct a synthetic signal with a theta, gamma and white noise component.
+def construct_synth(f_p, f_a, srate, data_length, n_sin, sigma, A_fpmax = 1, nonmodulatedamplitude=2):
+    tg, _, _ = construct_thetagamma(f_p, f_a, srate, data_length, n_sin, A_fpmax = A_fpmax, nonmodulatedamplitude=nonmodulatedamplitude)
+    return add_noise(tg, sigma)
+
+# compute pearson's r correlation between two phase-aligned IFs
+def compute_corr(paIF_gt, paIF):
+    return scipy.stats.pearsonr(paIF_gt, paIF)[0]
+
+def corrs_increasing_noise(truth_paif, thetagamma, srate, noise_bins, method_names, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, iterations, add_imf_above=False):
+    """
+
+    Computes the correlation of an EMD output to the ground truth component under varying noise. 
+    The ground truth component is part of a signal with a gamma component and a noise component.
+
+    Parameters
+    ----------
+    truth_paif :
+        Phase-aligned IF of ground truth component.
+    srate :
+        Sample rate of signal in Hz.
+    noise_bins :
+        an array of standard deviations of noise.
+    method_names : names of EMD methods to use.
+    maskmethods_gen : 
+        List of configurations for all (iterated) mask EMD methods.
+    ensemblemethods_gen :
+        List of configurations for ensembleEMD methods.
+    freq_edges  :
+        Edges of frequency bins to set domain for spectral analysis.
+    f_p :
+        The frequency of the phase-modulating frequency (part of the true theta component).
+    add_imf_above:
+        Determines whether to select one IMF from each set, or two. If False, only the IMF with an estimated
+        frequency closest to f_p will be compared to the ground truth. If True, the IMF above the selected
+        IMF will be added to the selected IMF for further analysis.
+    Returns
+    -------
+    corrs_mean : The average corr for each method after n iterations.
+    corrs_std : The average corr error for each method after n iterations.
+        
+
+    """
+    
+    corrs = np.zeros((len(noise_bins), len(method_names), iterations))
+    for iteration in range(iterations):
+        for row, sigma in enumerate(noise_bins):
+            lfp = add_noise(thetagamma, sigma) 
+            _, selected_imfs_all, _, _, _, _ = gensignal_analysis(lfp, srate, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, add_imf_above)
+            for col, imf in enumerate(selected_imfs_all):
+                try:
+                    imf_pa_IF = calc_pa_IF(imf, srate)
+                    corr = scipy.stats.pearsonr(truth_paif, imf_pa_IF)[0]
+                except:
+                    corr = np.nan
+                corrs[row,col,iteration] = corr
+        print('\r i = {} , {}'.format(iteration, (corrs[:,:,iteration]) ), end="")
+    corrs_mean = np.nanmean(corrs, axis=2)
+    corrs_std = np.nanstd(corrs, axis=2)
+    return corrs_mean, corrs_std
+
+def corrs_increasing_fd(n_sin_bins, method_names, maskmethods_gen, ensemblemethods_gen, freq_edges, iterations, f_p, f_a, srate, data_length, fixed_sigma, A_fpmax = 1, nonmodulatedamplitude=2, add_imf_above=False):
+    """
+    Computes the correlation of an EMD output to the ground truth component with varying degrees of frequency distortion. 
+    The ground truth component is part of a signal with a gamma component and a noise component.
+    ----------
+    n_sin_bins :
+        An array of amounts of sine iterations
+    method_names : names of EMD methods to use.
+    maskmethods_gen : 
+        List of configurations for all (iterated) mask EMD methods.
+    ensemblemethods_gen :
+        List of configurations for ensembleEMD methods.
+    freq_edges  :
+        Edges of frequency bins to set domain for spectral analysis.
+    f_p :
+        The frequency of the phase-modulating frequency (part of the true theta component).
+    f_a :
+        The frequency of the amplitude-modulated frequency (part of the gamma component).
+    srate :
+        Sample rate of signal in Hz.
+    data_length : 
+        Length of generated signals.
+    fixed_sigma : 
+        Standard deviation of white noise component in generated signal.
+    A_fpmax : 
+        The max amplitude of the phase-modulating (theta) component
+    nonmodulatedamplitude : 
+        The amplitude of gamma component that is not modulated by theta phase.
+    add_imf_above:
+        Determines whether to select one IMF from each set, or two. If False, only the IMF with an estimated
+        frequency closest to f_p will be compared to the ground truth. If True, the IMF above the selected
+        IMF will be added to the selected IMF for further analysis.
+    Returns
+    -------
+    corrs_mean : The average corr for each method after n iterations.
+    corrs_std : The average corr error for each method after n iterations.
+        
+
+    """
+    corrs = np.zeros((len(n_sin_bins), len(method_names), iterations))
+    for iteration in range(iterations):
+        for row, n_sin in enumerate(n_sin_bins):
+            n_sin = int(n_sin)
+            # construct synthetic signal
+            lfp = construct_synth(f_p, f_a, srate, data_length, n_sin, fixed_sigma, A_fpmax = A_fpmax, nonmodulatedamplitude=nonmodulatedamplitude)
+            truth_paif = calc_pa_IF(lfp, srate)
+            _, selected_imfs_all, _, _, _, _ = gensignal_analysis(lfp, srate, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, add_imf_above)
+            for col, imf in enumerate(selected_imfs_all):
+                try:
+                    imf_pa_IF = calc_pa_IF(imf, srate)
+                    corr = scipy.stats.pearsonr(truth_paif, imf_pa_IF)[0]
+                except:
+                    corr = np.nan
+                corrs[row,col,iteration] = corr
+        print('\r i = {} , {}'.format(iteration, (corrs[:,:,iteration]) ), end="")
+    corrs_mean = np.nanmean(corrs, axis=2)
+    corrs_std = np.nanstd(corrs, axis=2)
+    return corrs_mean, corrs_std
+    
+def pmsis_increasing_noise(thetagamma, srate, noise_bins, method_names, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, iterations, add_imf_above=False):
+    """
+
+    Computes the correlation of an EMD output to the ground truth component under varying noise. 
+    The ground truth component is part of a signal with a gamma component and a noise component.
+
+    Parameters
+    ----------
+    thetagamma :
+        signal with a theta and a gamma component summed up.
+    srate :
+        Sample rate of signal in Hz.
+    noise_bins :
+        an array of standard deviations of noise.
+    method_names : names of EMD methods to use.
+    maskmethods_gen : 
+        List of configurations for all (iterated) mask EMD methods.
+    ensemblemethods_gen :
+        List of configurations for ensembleEMD methods.
+    freq_edges  :
+        Edges of frequency bins to set domain for spectral analysis.
+    f_p :
+        The frequency of the phase-modulating frequency (part of the true theta component).
+    add_imf_above:
+        Determines whether to select one IMF from each set, or two. If False, only the IMF with an estimated
+        frequency closest to f_p will be compared to the ground truth. If True, the IMF above the selected
+        IMF will be added to the selected IMF for further analysis.
+    Returns
+    -------
+    pmsis_mean : The average pmsis for each method after n iterations.
+    pmsis_std : The average pmsis error for each method after n iterations.
+        
+
+    """
+    pmsis = np.zeros((len(noise_bins), len(method_names), iterations))
+    for iteration in range(iterations):
+        for row, sigma in enumerate(noise_bins):
+            lfp = add_noise(thetagamma, sigma) 
+            _, _, _, _, _, pmsis_all = gensignal_analysis(lfp, srate, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, add_imf_above)
+            pmsis[row,:,iteration] = np.array(pmsis_all)
+    pmsis_mean = np.nanmean(pmsis, axis=2)
+    pmsis_std = np.nanstd(pmsis, axis=2)
+    return pmsis_mean, pmsis_std
+
+def pmsis_increasing_fd(n_sin_bins, method_names, maskmethods_gen, ensemblemethods_gen, freq_edges, iterations, f_p, f_a, srate, data_length, fixed_sigma, A_fpmax = 1, nonmodulatedamplitude=2, add_imf_above=False):
+    """
+
+    Computes the PMSI of selected IMF or the sum of 2 IMFs of different EMD methods on generated signals with varying frequency distortion in theta component.  
+    ----------
+    n_sin_bins :
+        An array of amounts of sine iterations
+    method_names : names of EMD methods to use.
+    maskmethods_gen : 
+        List of configurations for all (iterated) mask EMD methods.
+    ensemblemethods_gen :
+        List of configurations for ensembleEMD methods.
+    freq_edges  :
+        Edges of frequency bins to set domain for spectral analysis.
+    f_p :
+        The frequency of the phase-modulating frequency (part of the true theta component).
+    f_a :
+        The frequency of the amplitude-modulated frequency (part of the gamma component).
+    srate :
+        Sample rate of signal in Hz.
+    data_length : 
+        Length of generated signals.
+    fixed_sigma : 
+        Standard deviation of white noise component in generated signal.
+    A_fpmax : 
+        The max amplitude of the phase-modulating (theta) component
+    nonmodulatedamplitude : 
+        The amplitude of gamma component that is not modulated by theta phase.
+    add_imf_above:
+        Determines whether to select one IMF from each set, or two. If False, only the IMF with an estimated
+        frequency closest to f_p will be compared to the ground truth. If True, the IMF above the selected
+        IMF will be added to the selected IMF for further analysis.
+    Returns
+    -------
+    pmsis_mean : The average pmsis for each method after n iterations.
+    pmsis_std : The average pmsis error for each method after n iterations.
+        
+
+    """
+    pmsis = np.zeros((len(n_sin_bins), len(method_names), iterations))
+    for iteration in range(iterations):
+        for row, n_sin in enumerate(n_sin_bins):
+            n_sin = int(n_sin)
+            # construct synthetic signal
+            lfp = construct_synth(f_p, f_a, srate, data_length, n_sin, fixed_sigma, A_fpmax = A_fpmax, nonmodulatedamplitude=nonmodulatedamplitude)
+            _, _, _, _, _, pmsis_all = gensignal_analysis(lfp, srate, maskmethods_gen, ensemblemethods_gen, freq_edges, f_p, add_imf_above)
+            pmsis[row,:,iteration] = np.array(pmsis_all)
+    pmsis_mean = np.nanmean(pmsis, axis=2)
+    pmsis_std = np.nanstd(pmsis, axis=2)
+    return pmsis_mean, pmsis_std
+
